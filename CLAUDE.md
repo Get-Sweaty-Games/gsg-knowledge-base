@@ -1,42 +1,65 @@
-# Interpreted-Context-Methdology
+# Get Sweaty Games — Knowledge Base
 
-ICM is a framework for building structured, multi-stage AI workflows out of markdown files and folder conventions. Each workspace gives AI agents the right context at each stage of a task, and gives humans clear edit surfaces between stages.
+Org-wide single source of truth. Drop raw specs/notes into `inbox/`, run `/process-inbox`
+to sort them into the right department.
 
 ## Folder Map
 
 ```
-model-workspace-protocol/
+Interpretable-Context-Methodology/
 ├── CLAUDE.md                          (you are here)
-├── README.md                          (project overview)
-├── LICENSE
-├── _core/                             (shared conventions and templates)
-│   ├── CONVENTIONS.md                 (source of truth for all patterns)
-│   ├── placeholder-syntax.md          (how {{VARIABLES}} work)
-│   └── templates/                     (blank starting points for new workspaces)
-└── workspaces/
-    ├── script-to-animation/           (content idea -> animated video)
-    ├── course-deck-production/        (unstructured material -> course PowerPoints)
-    └── workspace-builder/             (builds new MWP workspaces)
+├── README.md                          (human-facing overview)
+├── LICENSE                            (internal-use notice)
+├── _core/
+│   ├── CONVENTIONS.md                 (canonical rules — source of truth for all patterns)
+│   ├── ownership-map.md               (who owns what, defer targets)
+│   └── templates/new-department-template.md
+├── departments/
+│   ├── engineering/                   (backend, infra, API contracts)
+│   ├── game-design/                   (Unity + game design content)
+│   └── design-marketing/              (landing page, brand, marketing)
+├── shared/                            (cross-department docs only)
+└── inbox/                             (drop point + pending-owner-review/)
 ```
+
+## Departments
+
+| Department | Folder | Covers | Owner |
+|---|---|---|---|
+| Engineering | `departments/engineering/` | Backend, infra, API contracts | see `_core/ownership-map.md` |
+| Game Design | `departments/game-design/` | Unity client + game design content | see `_core/ownership-map.md` |
+| Design/Marketing | `departments/design-marketing/` | Landing page, brand, marketing | see `_core/ownership-map.md` |
 
 ## Routing
 
 | You want to... | Go to |
-|-----------------|-------|
-| Create content with script-to-animation | `workspaces/script-to-animation/CLAUDE.md` |
-| Build course slide decks from source material | `workspaces/course-deck-production/CLAUDE.md` |
-| Build a new workspace for any domain | `workspaces/workspace-builder/CLAUDE.md` |
-| Read the full MWP specification | `_core/CONVENTIONS.md` |
-| Understand the placeholder system | `_core/placeholder-syntax.md` |
-| Use a template for a new workspace | `_core/templates/` |
+|---|---|
+| Drop in a new raw spec/note | `inbox/CONTEXT.md` |
+| Sort what's in the inbox | run `/process-inbox` |
+| Browse Engineering knowledge | `departments/engineering/CONTEXT.md` |
+| Browse Game Design knowledge | `departments/game-design/CONTEXT.md` |
+| Browse Design/Marketing knowledge | `departments/design-marketing/CONTEXT.md` |
+| Find a cross-department doc | `shared/CONTEXT.md` |
+| See who owns what | `_core/ownership-map.md` |
+| Read the full conventions | `_core/CONVENTIONS.md` |
+| Add a new department | `_core/templates/new-department-template.md` |
 
 ## Triggers
 
 | Keyword | Action |
-|---------|--------|
-| `setup` | Run onboarding in whatever workspace you are in |
-| `status` | Show pipeline completion for the current workspace |
+|---|---|
+| `process-inbox` | Sort everything in `inbox/` into the right department (or flag conflicts) |
+| `status` | Show inbox backlog, pending-owner-review count, recent additions per department |
 
-## How It Works
+### How `status` works
 
-Each workspace is self-contained with its own CLAUDE.md. Navigate into a workspace folder and that workspace's CLAUDE.md takes over. You do not need to read this root file once you are inside a workspace.
+1. Count files directly in `inbox/` (excluding `CONTEXT.md` and `pending-owner-review/`) → backlog count.
+2. Count files in `inbox/pending-owner-review/` (excluding `CONTEXT.md`) → pending count, listing which owner each is waiting on (from its note block).
+3. For each department and `shared/`, read the top 3 rows of `updates.md` → "Recently added."
+4. Render a short report.
+
+## How This Repo Works
+
+Built on the Interpretable Context Methodology (ICM) — reshaped from ICM's linear content
+pipelines into a standing, department-organized knowledge base. No stages, no pipelines,
+just departments and one manual sorting skill. Full pattern set in `_core/CONVENTIONS.md`.
