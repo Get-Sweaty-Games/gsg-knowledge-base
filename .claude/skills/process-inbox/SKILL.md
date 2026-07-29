@@ -1,6 +1,6 @@
 ---
 name: process-inbox
-description: Sorts raw drop-in files from inbox/ into the correct department folder (engineering, game-design, design-marketing) or shared/, checking each one against existing canonical docs for duplicates or contradictions. Stops and asks before integrating anything ambiguous or conflicting — always offering the option to defer to the subject-matter owner. Run manually with /process-inbox whenever inbox/ has new material; nothing here runs automatically.
+description: Sorts raw drop-in files from inbox/ into the correct department folder (engineering, game-design, design-marketing) or shared/, splitting a single file into subject-focused pieces when it spans more than one department so each filed doc stays on one topic. Checks each piece against existing canonical docs for duplicates or contradictions. Stops and asks before integrating anything ambiguous or conflicting — always offering the option to defer to the subject-matter owner. Run manually with /process-inbox whenever inbox/ has new material; nothing here runs automatically.
 ---
 
 # Process Inbox
@@ -27,24 +27,38 @@ exactly — never invent an owner or a department that isn't listed there.
    Game Design but a different defer target); brand/landing-page/marketing copy points
    to Design/Marketing. Treat an explicit "For: X" header in the file as a strong signal,
    but still sanity-check it against the actual content.
-4. Check for contradiction or duplication (the canonical-sources smell test): search the
-   candidate department's `docs/CONTEXT.md` index and `shared/docs/` for matching topics
-   or overlapping phrasing.
-5. Decide clear vs. conflicted:
-   - Clear (one obvious department, no contradiction) → integrate.
-   - Ambiguous department, or contradicts/duplicates an existing doc → stop, this is a
-     conflict.
+   - **One dropped file is not one department.** A single drop is a container, not a
+     unit of filing — if it covers distinct subjects that belong to different
+     departments (e.g. a status update that mentions a backend fix, a game-balance
+     change, and a landing-page tweak in one file), split it by subject during
+     integration. Each piece goes to its own department, as its own doc.
+4. Check each piece for contradiction or duplication (the canonical-sources smell
+   test): search the candidate department's `docs/CONTEXT.md` index and `shared/docs/`
+   for matching topics or overlapping phrasing.
+5. Decide clear vs. conflicted, per piece, not per file:
+   - Clear (one obvious department, no contradiction) → integrate that piece.
+   - Ambiguous department, or contradicts/duplicates an existing doc → stop, this piece
+     is a conflict. Clear pieces from the same file still integrate normally.
 6. After the whole batch, print a summary: integrated count and where each landed,
    deferred count and who each is waiting on.
 
 ## Integrating a clear item
 
-1. Pick a descriptive lowercase-hyphenated filename.
-2. Write the content into `departments/<dept>/docs/<name>.md` (or `shared/docs/<name>.md`
-   if it's genuinely cross-department).
-3. Add a row to that folder's `docs/CONTEXT.md` index: Doc | Topic | Added | Source.
-4. Add a row to the top of that folder's `updates.md`: Date | Doc | Summary | Dropped By.
-5. Delete the original file from `inbox/`.
+1. Break the file into subject-focused pieces first. Each piece should cover one
+   subject and belong cleanly to one department (or `shared/`) — never write a doc that
+   bundles unrelated topics just because they arrived in the same file. A single-subject
+   inbox drop is one piece; a mixed drop becomes as many pieces as it has subjects.
+2. For each piece: pick a descriptive lowercase-hyphenated filename, and write it into
+   `departments/<dept>/docs/<name>.md` (or `shared/docs/<name>.md` if it's genuinely
+   cross-department).
+3. Add a row to that folder's `docs/CONTEXT.md` index for each piece: Doc | Topic |
+   Added | Source.
+4. Add a row to the top of that folder's `updates.md` for each piece: Date | Doc |
+   Summary | Dropped By.
+5. Once every piece from the file has been filed, delete the original from `inbox/`. If
+   one piece turned out to be a conflict (see below) while the rest were clear, file the
+   clear pieces and leave only the conflicting piece behind for the conflict flow —
+   don't block the whole file on one ambiguous part.
 
 ## Handling a conflict
 
@@ -60,7 +74,9 @@ exactly — never invent an owner or a department that isn't listed there.
    whether to update the existing canonical doc in place (the default recommendation) or
    keep both as noted variants.
 4. If deferred:
-   - Move the file, unedited, into `inbox/pending-owner-review/`.
+   - Move only the conflicting piece's raw text, unedited, into a new file in
+     `inbox/pending-owner-review/` (the rest of the original file, if any pieces were
+     already filed elsewhere, is gone — it's been integrated, not held back).
    - Prepend a note block: `Deferred on [date]. Reason: [...]. Owner: [...]`.
    - Do not integrate it anywhere. Do not open a GitHub issue.
 
