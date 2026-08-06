@@ -321,22 +321,30 @@ Order of operations, each a hard gate before the next runs:
    - A race on this insert (two concurrent uploads of the same native id, or overlapping windows from two sources both passing the pre-check before either commits) surfaces as `23505` (unique) or `23P01` (exclusion) — both are caught and mapped to the same `duplicate_workout` outcome as the soft dedup check, not an error.
 7. **No referral payout at ingest.** As of migration `0043` the referral fires at *register* time, not here — the gate requires a `registered=true` activity, which an accepted-but-pending ingest can never satisfy. The `creditReferralIfPending` call therefore lives in `POST /activities/register`, not `ingestActivity` (see Guild + referral section, `credit_referral`).
 
-### Daily XP cap (migration `0028_daily_xp_cap.sql`; window re-keyed by `0046` — **SHIPPED**)
+### Daily XP cap (migration `0028_daily_xp_cap.sql`; window re-keyed by `0046`, split into two budgets by `0054` — **SHIPPED**)
 
 - Enforced by a Postgres `BEFORE INSERT OR UPDATE OF awarded` trigger (`clamp_daily_awarded_xp`) on `activities` — not application code — because ingest requests are independent transactions (PostgREST) and a TS-level sum-then-clamp would race under concurrent uploads.
 - No-ops (`return new` unchanged) when `awarded IS NULL` or `accepted IS NOT true`.
 - Serializes per user via `pg_advisory_xact_lock(hashtext('daily_xp:' || user_id))` so two concurrent ingests for the same user can't both read the same "spent so far" and both mint (cross-user hash collisions are harmless — just spurious serialization).
 - Cap comes from `gameconfig.kinetic.formula.maxXpPerDay`, default fallback **2000** if the row/key is missing or non-numeric (gameconfig is an untrusted, live-tunable surface). This is a *second* ceiling layered on top of `0027`'s **1000 XP** per-activity cap — the per-activity cap alone doesn't stop many non-overlapping windows each claiming 1000.
+- **`0054` split this into TWO budgets, both derived from the same `maxXpPerDay` value** — one ceiling, two windows, so there is no second magnitude tunable:
+  - **Performed-day budget** — `maxXpPerDay` per local `started_at` day, **cumulative across every receipt day it is ever claimed on** (no `created_at` bound at all). This is the fairness bound: one day's training is worth one day's XP, however many times it is claimed. It also closed a hole `0028`–`0046` all shipped with — the cap keyed on *when* a row was written, never on *which day it claimed*, so nothing stopped a client claiming 2000 XP for Monday today, another 2000 for Monday tomorrow, and again the day after.
+  - **Receipt-day budget** — `maxXpPerDay × maxCatchUpDays` over `created_at` (default **7**, matching `HealthConnectReader.LOOKBACK`). This is the burst limiter.
+  - Final XP is `least(afterCollapse, performedRemaining, receiptRemaining)`.
+- **Why the receipt budget is flat rather than scaled by the number of distinct performed days in the batch.** Scaling is the obvious design and is provably redundant: the performed-day budget already caps each performed day at `P` across all receipt days, so a receipt day carrying `d` distinct performed days can never spend more than `P·d` anyway — `least(P·d, P·K)` can only ever bind in its `P·K` branch. Scaling would also have failed open in the commonest case: a receipt day carrying only passive rows counts **zero** distinct days, giving a **zero** budget, so `steps` would never award again.
 - "Spent" = `SUM(awarded->>'xp')` over this user's `accepted=true, awarded IS NOT NULL` rows **within the user's local RECEIPT day**, **excluding the row being written** (`activity_id <> new.activity_id`) — the self-exclusion exists so an idempotent upsert-retry (which fires this trigger via the `UPDATE OF awarded` path, e.g. the run-fragment merge's UPDATE) doesn't count its own prior value against itself.
 - **The window is a local calendar day (midnight→midnight in `profiles.timezone`) keyed on server receipt time (`created_at`) — changed from a rolling 24h window by `0046`.** The rolling window was wrong on its own terms: a workout Mon 19:00 and another Tue 08:00 are 13h apart, so the Tuesday session was clamped against Monday's spend despite being a different day. A cap called "per day" runs midnight to midnight.
-- **It stays keyed on `created_at`, never the client-controlled `started_at`** — this is the anti-backdate anchor. The server clock is the only bound a forged bundle cannot move: a client fabricating 20 backdated days and uploading them at once puts them all in ONE receipt day, clamped to a single day's budget. Note this is deliberately the **opposite** column from the collapse/axis-cap window in the same trigger (see next section) — fairness vs. forgery-resistance, two different jobs. The asymmetry is intentional and must not be "fixed."
+- **The burst budget stays keyed on `created_at`, never the client-controlled `started_at`** — this is the anti-backdate anchor. A client fabricating 20 backdated days and uploading them at once puts them all in ONE receipt day, clamped to **`maxCatchUpDays` days' budget** (not one day's, as this said pre-`0054`). Since `0054` the trigger reads *both* columns for XP — the performed day for its own budget, the receipt day for the burst — so the old framing of "deliberately the opposite column from the collapse/axis-cap window" no longer describes it. The distinction that survives is by **job, not by column**: performed-day windows do fairness, receipt-day windows do burst limiting, and no window may be re-keyed to "fix" the asymmetry into consistency.
+- **What actually makes the receipt day unforgeable is `0053`, not `0028`.** Every window here buckets `at time zone profiles.timezone`, and until `0053` that column was on the client's `UPDATE` allowlist (`0018`) — so a client could move its own local midnight and reset *every* window on demand, roughly every 30–60 minutes across the ~38 distinct IANA offsets. The claim "the server clock is the only mint bound an attacker cannot move" was false from the moment `0046` replaced `0028`'s rolling-24h window with a calendar day. `0053` revoked the column and rate-limits changes to one per 24h.
+- **The sustained mint rate is unchanged by `0054`, and that is the argument that licenses the multiplier.** On the first receipt day a forger gets `maxXpPerDay × maxCatchUpDays`. On the second, those backdated days are already drained by the performed-day budget — only "today" is fresh — so the rate falls back to `maxXpPerDay`/day. This **requires** a bound on future `startedAt`; `EvidenceBundleSchema`'s refine was one-sided (`now - startedAt <= 8d` is trivially true for a future date) until it was made two-sided alongside `0054`, with a 1-day clock-skew allowance.
 - **Residual (accepted, `0046`):** midnight-to-midnight is strictly weaker than rolling-24h at the boundary — 2000 XP at 23:50 plus 2000 at 00:10 is now legal. That is what "per day" means once you commit to calendar days, and the receipt-day anchor still caps a forged multi-day upload at one day's budget, which is the property that matters against forgery.
-- **Dependency:** background Health Connect sync (host-side, **NOT YET IMPLEMENTED** — see § *Health Connect background sync — permission-staged onboarding*, task `4e`) is what keeps `created_at` near `started_at` for legitimate users. Until it ships, a user who batch-syncs two training days on one app-open still collides against a single receipt day's budget — a known, documented interim window, not a design intent.
+- **Dependency — RESOLVED by `0054`, no longer a dependency.** This previously read: background Health Connect sync (task `4e`) is what keeps `created_at` near `started_at`, and until it ships a user who batch-syncs two training days on one app-open collides against a single receipt day's budget. That interim window is closed in the server instead — a batch sync of `maxCatchUpDays` performed days now rewards every one of them in full. `4e` remains worth shipping for data freshness and nudge timing, but it is no longer load-bearing for reward fairness. This also closed Phase 4 exit **gate 2**, whose device experiment relied on the very clamp `0054` removed and would now pass trivially.
 - Clamp behavior when `xp > remaining budget` (a clamp, not a reject — the workout still counts toward the weekly target):
   - `xp` → `floor(remaining)`.
   - `gold` → `floor(gold * remaining / xp)` (proportional scale-down).
-  - if `remaining == 0`: all four stats zeroed too, so a capped-out farmer can't keep minting stat points at 0 XP.
-  - `awarded.dailyCapApplied = true` added for observability; `register_pending_activities` reads only `xp/gold/stats` and ignores this flag.
+  - if **either** budget's `remaining == 0` (`0054`; previously the receipt one alone): all four stats zeroed too, so a capped-out farmer can't keep minting stat points at 0 XP. Keying it on the receipt budget alone would have fired `maxCatchUpDays` times later than before, loosening the stat residual below by that same factor.
+  - **`steps` and `sleep` are exempt from that zero-stats block** (they still *consume* budget). Passive rows always arrive *after* the workouts of the day they belong to — a steps row for day D uploads on D+1, and a sleep session starting 23:15 on D has performed day D — so on a full training day they would otherwise land on a drained performed-day budget and lose the stat point `0045` deliberately made un-preemptable. They must keep consuming, because `stepCount` is a client claim worth up to 300 XP at the schema ceiling.
+  - `awarded.dailyCapApplied = true` added for observability, and `performedDayCapApplied = true` (`0054`) additionally names *which* budget bound the row — without it there is no way to tell from production data whether the performed-day clamp is hitting real training, which is the number that decides whether `maxCatchUpDays` needs retuning. `register_pending_activities` reads only `xp/gold/stats` and ignores both flags.
 
 ### Per-type reward collapse + per-axis stat cap (migrations `0045` + `0046` — **SHIPPED**, all three Mechanisms)
 
@@ -367,6 +375,14 @@ tunable like `maxXpPerDay`, never hardcoded). The axis map is `ACTIVITY_STAT_AXI
 `workout→null`). Two **different** types on the **same** axis (run + cycling → CON; hiit + dance →
 DEX) each earn their own XP/gold and their own weekly credit, but the shared axis yields only **one**
 stat point that day. `workout` (null axis) grants no stat and consumes no axis slot.
+
+**`0054` gave this the same two-window treatment as the XP cap:** `N` per **performed** day (as
+above, unchanged) *and* `N × maxCatchUpDays` per **receipt** day. The performed-day key is
+client-controlled, so N backdated days always yielded N points on one axis — the residual below —
+and the only thing bounding it was the XP budget, which barely does: stat points are cheap in XP, so
+a forger can claim many days well under any XP ceiling. Widening the receipt XP budget by
+`maxCatchUpDays` would have weakened that proxy by the same factor, so the axis cap now carries its
+own receipt-day ceiling instead of borrowing one.
 
 **Mechanism 3 — weekly credit is per distinct `(activity_type, local_day)` — SHIPPED.** Same type
 twice in a day = **one** weekly credit (they collapsed); different types = separate credits even on
@@ -403,14 +419,19 @@ always earn separate credits, whenever they sync.)*
   Monday and Tuesday but opened the app Wednesday had both workouts land in one receipt-day bucket
   and the second collapsed to 0 XP. Two workouts on two calendar days are two workouts, however late
   they sync.
-- **This is deliberately the opposite column from the daily XP cap in the same trigger.** Collapse and
-  axis cap key on `started_at` because that is what *fairness* means; the XP cap keys on `created_at`
-  because that is the only clock a client cannot forge. Two windows, two jobs. The asymmetry is
-  intentional and documented in `0046`'s header — do not "fix" it into consistency.
-- **Residual (accepted, `0046`):** a client backdating `started_at` across N fake days can claim N
-  axis stat points instead of 1. Bounded by the receipt-day XP budget — once exhausted, the trigger
-  zeroes all stats regardless of `started_at`. Accepted: denying a legitimate batch-syncing user
-  their real second workout is the worse failure mode.
+- **Two windows, two jobs — split by job, not by column (restated for `0054`).** Pre-`0054` this read
+  "deliberately the opposite column from the daily XP cap in the same trigger", which no longer
+  describes the code: since `0054` *both* the XP cap and the axis cap read *both* columns. The durable
+  rule is the job each window does — a **performed-day** window exists for *fairness* (a workout counts
+  against the day it happened), a **receipt-day** window exists for *burst limiting* (`created_at` is
+  the clock a client cannot forge). Every clamp now carries one of each. Do not "fix" that into
+  consistency by dropping either.
+- **Residual (`0046`), now bounded properly by `0054`:** a client backdating `started_at` across N fake
+  days can claim N axis stat points instead of 1. `0046` bounded this only via the receipt-day XP
+  budget — once exhausted, all stats zero regardless of `started_at` — which was weak, because stat
+  points cost very little XP. `0054` gives the axis cap its own receipt-day ceiling of
+  `N × maxCatchUpDays`, bounding the burst directly instead of through an XP proxy. The accepted part
+  stands: denying a legitimate batch-syncing user their real second workout is the worse failure mode.
 - **Enforcement (server-side, race-safe like 0028).** Both clamps are day-window high-water-marks
   computed against the user's already-awarded rows for the local day, **excluding the row being
   written** (`activity_id <> new.activity_id`, so an idempotent upsert / run-merge doesn't count
@@ -430,10 +451,12 @@ always earn separate credits, whenever they sync.)*
   `sum(...) filter (where activity_type <> 'steps')` over the four `awarded->stats` keys directly
   — no separate axis column or mapping table needed. `activity_type` + a derived `local_day` cover
   Mechanisms 1 and 3 with no schema addition.
-- **Stacking:** runs **before** `maxXpPerActivity` (0027) and `maxXpPerDay` (0028) — confirmed as
-  shipped: the trigger computes the Mechanism 1 collapse first, then applies the 0028 receipt-day
-  remaining-budget clamp on top of the collapsed value in the same pass. Two window scans, two
-  columns (`started_at` for the collapse, `created_at` for the budget), one advisory lock.
+- **Stacking:** runs **before** `maxXpPerActivity` (0027) and the XP budgets (0028/0054) — confirmed as
+  shipped: the trigger computes the Mechanism 1 collapse first, then clamps the collapsed value with
+  `least(afterCollapse, performedRemaining, receiptRemaining)` in the same pass. Still **two window
+  scans and one advisory lock** after `0054` — the two new budgets ride the scans `0045`/`0046` already
+  established (`activities_user_started_awarded_idx`, `activities_user_created_awarded_idx`) as extra
+  aggregate columns, so no new index and no extra query.
 - **`steps` precedence — RESOLVED as recommended.** The synthetic 24h `steps` aggregate maps to
   CON. Shipped behavior: `steps` is exempt from the axis cap in both directions — a `steps` row's
   own stat is never capped, and it never counts toward the axis-cap sum for other rows (`activity_type
