@@ -1,14 +1,14 @@
-# Integration Decisions — Unity ↔ Backend
+# Integration Decisions — Unity ↔ Backend (backend/API side)
 
-> **FROZEN 2026-08-08. This is a decision record. It is not a status document.**
+> Filed from inbox `integration-decisions-unity-backend.md` (frozen 2026-08-08 decision record).
+> This doc carries the backend/API/wire-protocol portions only. Owner-level product decisions
+> B1–B6 (orientation, gold naming, run loop, guild scope, workout hook) are filed separately in
+> `departments/game-design/docs/unity-integration-owner-decisions.md`.
 >
-> It records **why** choices were made during the Unity↔backend integration, and what the partner
-> studio answered. It deliberately says nothing about what is built, done, or outstanding.
->
-> **For what is still open, read `Get-Sweaty-Games/reign-and-gain-unity` issue #247.** For what a
-> phase currently is, read the code.
->
-> **Do not add status to this file.** Status is exactly what broke its predecessor.
+> **This is a decision record, not a status document.** It records why choices were made during
+> the Unity↔backend integration, and what the partner studio answered. It says nothing about what
+> is built, done, or outstanding — for that, read the Unity repo's issue #247 or the code itself.
+> **Do not add status to this file.**
 
 ## Provenance, and why this file was frozen
 
@@ -25,15 +25,15 @@ three more within a day: two issues it listed as open had closed, a third had cl
 and its own count of inbound links was wrong. Line-number citations from the sibling plan into it had
 rotted by twenty-four lines.
 
-The lesson is the same one its own postmortem drew (§6 below), one level up: **a document that
+The lesson is the same one its own postmortem drew (§5 below), one level up: **a document that
 restates a fact owned elsewhere will drift, and adding a section to keep it current adds a source
 rather than removing one.** So the status is deleted rather than corrected, and what remains is the
 part that cannot go stale — decisions already made, with their reasons.
 
 Sibling material, single copies, do not duplicate:
 
-- `inbox/partner-answers.md` (this repo) — the partner's four answer batches covering C1–C18 plus B1.
-  The **only** copy. §2's verdicts cite into it.
+- `departments/engineering/docs/unity-partner-qa-record.md` (this repo) — the partner's four answer
+  batches covering C1–C18 plus B1. The **only** copy. §1's verdicts cite into it.
 - `docs/BACKEND-INTEGRATION-PLAN.md` (Unity repo) — the file-by-file plan. Its §5 carries the original
   question list and its §6 the effort estimates.
 
@@ -50,7 +50,7 @@ worth not re-deriving**, not to state what exists.
 | Cut from the slice | What the cut became, and why |
 |---|---|
 | `com.unity.nuget.newtonsoft-json` — use `JsonUtility` instead | **Reversed.** The DTO layer needs field-omission semantics (`NullValueHandling.Ignore`) that `JsonUtility` cannot express, and `POST /runs/settle` is `additionalProperties:false`, so an emitted null is a 400 |
-| The evidence bundle / workout→claim loop | **Reversed**, minus `ActivityUploadQueue`, which stays deferred on purpose — see §5 |
+| The evidence bundle / workout→claim loop | **Reversed**, minus `ActivityUploadQueue`, which stays deferred on purpose — see §4 |
 | Gyms, guild create/join/invite/members, push, Strava | **Reversed at materially reduced scope**, per C5 and C1 — see §2 |
 | The run-settlement seam (`IRunSettlement`) | **Reversed early**, per the full plan's §6 recommendation, while `RunController`'s surface area was still small |
 | The browser-PKCE fallback | **Reversed** once native sign-in shipped and the host's `consumePendingAuthCode` turned out to already exist |
@@ -63,7 +63,8 @@ three tabs and a stub.
 
 ## 2. Partner answers — C1 to C18
 
-One row per item. Full reasoning sits at the cited location in `inbox/partner-answers.md`.
+One row per item. Full reasoning sits at the cited location in
+`departments/engineering/docs/unity-partner-qa-record.md`.
 
 | # | Question (short) | Verdict | Where |
 |---|---|---|---|
@@ -78,7 +79,7 @@ One row per item. Full reasoning sits at the cited location in `inbox/partner-an
 | C9 | Optionality of every `X \| null` field | `.optional()` ≠ `.nullable()`; a default Json.NET null 400s the whole bundle. The server now strips nulls before validating | batch 3, `## C9` |
 | C10 | `GET /state` cannot feed Home as briefed | Ship narrower — see callouts | batch 3, `## C10` |
 | C11 | Which config keys are authoritative | One `appconfig.json`, five keys including `googleWebClientId` | batch 1, `## C11` |
-| C12 | `oauthRedirect` cannot be asserted at runtime | `UnityBridge.oauthRedirect()` static, as proposed. Adopted by the boot asserts — §4 | batch 4, `## C12` |
+| C12 | `oauthRedirect` cannot be asserted at runtime | `UnityBridge.oauthRedirect()` static, as proposed. Adopted by the boot asserts — §3 | batch 4, `## C12` |
 | C13 | What is `requiresManualFlag` for? | Nothing actionable. The server pre-filters the catalogue; **never map it to a bundle field** | batch 3, `## C13` |
 | C14 | `stopRunSession` with no session delivers nothing | Always exactly one reply — `OnRunSessionEnded` or `OnRunSessionError`, never an empty `OnRunSessionEnded`, deliberately | batch 4, `## C14` |
 | C15 | `permissionStatus() == DENIED` has no remedy | `UnityBridge.openHealthConnectSettings()`; gate the affordance on its `bool` return | batch 4, `## C15` |
@@ -92,7 +93,7 @@ One row per item. Full reasoning sits at the cited location in `inbox/partner-an
   invite codes for a late-listening Unity but pushed the auth code immediately, so a cold-start auth
   deep link vanished with nothing in the log. The code is now always parked and drained via
   `consumePendingAuthCode()`. The push-only `OnAuthCodeReceived` was **removed** from the host, not
-  deprecated — which is what makes the race in §5's "pulled, never pushed" decision unrepeatable.
+  deprecated — which is what makes the race in §4's "pulled, never pushed" decision unrepeatable.
 - **C7 — `no_provider:` could never have fired.** `HealthConnectReader`'s constructor called
   `HealthConnectClient.getOrCreate(context)` as a default argument, which throws when no Health
   Connect provider is installed. The app crashed at launch on a provider-less device, before any read
@@ -124,58 +125,7 @@ One row per item. Full reasoning sits at the cited location in `inbox/partner-an
 
 ---
 
-## 3. Owner decisions — B1 to B6
-
-### B1 — orientation — landscape everywhere
-
-The project is landscape-locked end to end. The brief's shell is shaped like a portrait phone app, and
-neither contract ever stated an orientation. Three options were on the table, plus a fourth "no bottom
-nav bar at all" left unevaluated. The full option table and both sides' reasoning are preserved in the
-Unity repo's issue #21.
-
-**Game design's call: landscape everywhere, including the launch splash.** Deliberately not the
-portrait-shell option, overriding the "logging a workout is one-handed, portrait" argument, on three
-grounds: a second canvas configuration is a cost paid forever, since every future screen must decide
-which frame it belongs to; nothing was built on the shell side, so there was no sunk portrait work to
-preserve; and `RgSkin` / `ProcTex` and the whole procedural material system are authored
-landscape-shaped throughout.
-
-Reversible if a device build shows the claim flow is genuinely unusable in landscape. The seam would
-move to the Game-tab boundary exactly as the portrait-shell option described, and the host absorbs it
-for free either way.
-
-**The portrait splash collapsed to a no-op.** There is no custom splash art, so the "splash" is Unity's
-own logo and a portrait splash meant rotating that logo 90°. `BeforeSplashScreen` is the only hook that
-runs early enough to affect it, and it renders *landscape*. Unity closed the Android rotation-flash
-issue as Won't Fix (1–15 frame desync, worse under URP), and `AndroidMinSdkVersion: 26` puts Android
-8/9 in the range Google confirmed cannot be fixed. Landscape-splash is the only clean outcome
-available, not a compromise.
-
-**One real gain identified and still owed:** assign the existing logo into `m_SplashScreenLogos` for an
-actual branded splash. A player notices that, unlike a rotated Unity logo.
-
-**A premise used in the discussion was wrong.** The reasoning assumed the host's `configChanges`
-already absorbs a runtime `Screen.orientation` switch with no Activity restart. No manifest in the
-Unity repo declared one, and the `.aar` declares no `<activity>` at all. It did not change B1's
-outcome. **Do not reuse it as a premise elsewhere.**
-
-### B2, B3, B5, B6
-
-| # | Question | Decision |
-|---|---|---|
-| B2 | Two quantities both called "gold" (`RunState.Gold` vs `character.gold`) | **Do not rename `RunState.Gold`** — twelve baseline rows and roughly twenty call sites reference it. Document the distinction; change only player-facing copy. Already free in-dungeon: the purse displays struck coins, never the word "Gold" |
-| B3 | Must the run loop work with no account and no network? | Keep a `GameRoot`-only entry path bypassing the shell, so the test-plus-AutoPilot ladder keeps working without a reachable backend. A sanctioned dev path, not a hidden bypass |
-| B5 | Scope of the frozen guild surface | Build only the live routes — create/join/invite/members plus a roster fed by `/state`. **None of the frozen world-boss UI.** C10 independently confirms the boss fields are permanently null |
-| B6 | The workout→game hook | **Do not decide it.** The settlement seam is what makes deferring it cheap — that is the whole point of the seam |
-
-### B4 — dissolved by C2
-
-Brief-listed as blocked, because no bridge method existed to clear stored tokens. C2 shipped
-`clearAuthTokens()`. Settings can ship logout. **Do not carry B4 forward as blocked.**
-
----
-
-## 4. The two boot assertions, and why they behave differently
+## 3. The two boot assertions, and why they behave differently
 
 C12's redirect check and the `hostVersion()` check were each documented in three places, implemented in
 none, and belonged to no phase in any table. Both decisions are pure statics taking their inputs as
@@ -203,7 +153,7 @@ Neither side can read that at runtime.
 
 ---
 
-## 5. Decisions taken during implementation
+## 4. Decisions taken during implementation
 
 Salvaged from the predecessor's phase table, which mixed these into a status column. They are the
 reasons a future reader would otherwise have to re-derive from a diff.
@@ -254,7 +204,7 @@ reasons a future reader would otherwise have to re-derive from a diff.
 - **`AutoPilot` gained a hub step** because it cannot press a button under an `AppSurface`.
 - **`referralRecorded` on the guild join response is the product's entire referral surface.**
 - **Nothing navigates between the shell pages, by design.** That is a game-design decision, tracked
-  separately.
+  separately — see `departments/game-design/docs/unity-integration-owner-decisions.md`.
 - A second, unclaimable ledger exists at `POST /rewards/claim`. It was found while widening the API
   surface; it is not the claim route the loop uses.
 
@@ -282,7 +232,7 @@ reasons a future reader would otherwise have to re-derive from a diff.
 
 ---
 
-## 6. The wire-drift postmortem — the failure this document was created to end
+## 5. The wire-drift postmortem — the failure this document was created to end
 
 Found and fixed 2026-07-30. Kept because the failure mode is the reason the predecessor existed, and
 because the freeze at the top of this file is the same lesson one level up.
@@ -304,8 +254,9 @@ grades against its own stale constant passes cleanly while being wrong.**
 
 **Root cause:** the Unity repo carried only batch 1 of the partner's answers, as a local extract.
 Batches 2–4 — including C4, C6, C7 and C14, all of which change the wire — landed only in this repo's
-`inbox/partner-answers.md` and were never read by the session that shipped the implementation. A later,
-complete answer sat in a sibling repo while the implementing work used an earlier, partial copy.
+`departments/engineering/docs/unity-partner-qa-record.md` and were never read by the session that
+shipped the implementation. A later, complete answer sat in a sibling repo while the implementing work
+used an earlier, partial copy.
 
 The partial copy was deleted on 2026-07-31 after confirming its content byte-for-byte against batch 1
 of the complete file, so the trap is disarmed rather than merely documented. It remains in git history

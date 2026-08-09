@@ -1,10 +1,11 @@
 # Unity-as-base topology — inversion analysis
 
-> **Status: ADOPTED 2026-07-28.** Written 2026-07-27 asking whether the client topology could be
-> inverted — Unity as the app process, Kotlin as a native plugin underneath it — instead of the then
-> UaaL model (Kotlin host embedding Unity as a library). Reviewed when the engine decision closed in
-> Unity's favour (2026-07-28) and **rejected**; reversed **the same day** when a partner studio took
-> ownership of the whole Unity client. **We are on Unity-as-base.**
+> **Status: ADOPTED 2026-07-28.** Filed from inbox `unity-plugin-topology.md`. Written 2026-07-27
+> asking whether the client topology could be inverted — Unity as the app process, Kotlin as a
+> native plugin underneath it — instead of the then UaaL model (Kotlin host embedding Unity as a
+> library). Reviewed when the engine decision closed in Unity's favour (2026-07-28) and **rejected**;
+> reversed **the same day** when a partner studio took ownership of the whole Unity client. **We are
+> on Unity-as-base.**
 >
 > Two superseded layers are preserved below rather than deleted — this doc's standing convention, and
 > the reason it survived the first rejection: a reasoned position is worth more than a gap, and the
@@ -33,8 +34,8 @@ native app that has substantial native-only screens outside the game.
 
 ## Why this project is a candidate for the inversion
 
-Per `docs/SPEC-behavior-derived.md` § Screen surface, this app has **18 screens, all of them the
-game** (Home/Roster/Game/Guild tab bar) — there is no native-only screen surface sitting alongside
+Per the behavior spec's § Screen surface, this app has 18 screens, all of them the
+game (Home/Roster/Game/Guild tab bar) — there is no native-only screen surface sitting alongside
 Unity content. That's exactly the case UaaL isn't built for. `docs/PLAN-unity.md` L10 only ever
 evaluated UaaL against third-party wrapper libraries (`flutter_unity_widget`,
 `@azesmway/react-native-unity` — rejected for maintenance-cliff risk); "Unity as base + Kotlin
@@ -77,11 +78,10 @@ Only the pieces that assume Kotlin owns the Activity lifecycle and the manifest:
 
 ### What doesn't change, and why it matters
 
-The host-owned-refresh-token trust design (`docs/SPEC-behavior-derived.md` § Auth, `CLAUDE.md`) is
-untouched. Its whole point is that the refresh token never enters Unity's managed/decompilable
-(IL2CPP/Mono) memory. A Kotlin plugin AAR is still native code outside that runtime, so
-`SecureTokenStore`/`TokenRefresher` keep the same guarantee, unmodified, regardless of which side
-owns the process.
+The host-owned-refresh-token trust design is untouched. Its whole point is that the refresh token
+never enters Unity's managed/decompilable (IL2CPP/Mono) memory. A Kotlin plugin AAR is still native
+code outside that runtime, so `SecureTokenStore`/`TokenRefresher` keep the same guarantee,
+unmodified, regardless of which side owns the process.
 
 ## Decision (2026-07-28): DECLINED — we stay on UaaL *(SUPERSEDED same day — see § Reversal)*
 
@@ -109,12 +109,12 @@ manifest merge. That is worth single-digit MB, not 80–180.
 
 ### Three reasons it is actively worse here
 
-1. **It deletes the only lever we have against the floor.** `UnityHostActivity.kt:40-45` and
-   `PLAN-unity.md` L107-113 both name the mitigation for a fatal memory floor: *tear-down-on-background*
-   rather than always-resident embedding. That requires the host to own `onCreate` and to decide when
-   the player exists. Under Unity-as-base the app **is** the player — you cannot not-load it. The
-   inversion does not sidestep the floor; **it removes the escape hatch.** This is the single
-   strongest argument against, and it inverts the doc's own thesis.
+1. **It deletes the only lever we have against the floor.** `UnityHostActivity.kt:40-45` names the
+   mitigation for a fatal memory floor: *tear-down-on-background* rather than always-resident
+   embedding. That requires the host to own `onCreate` and to decide when the player exists. Under
+   Unity-as-base the app **is** the player — you cannot not-load it. The inversion does not sidestep
+   the floor; **it removes the escape hatch.** This is the single strongest argument against, and it
+   inverts the doc's own thesis.
 
 2. **The targetSdk asymmetry runs against it, hard.** `:app` sets compileSdk/targetSdk **36**
    (`app/build.gradle.kts:36,42`); `unityLibrary` is **35** (`unityLibrary/build.gradle:19,32`).
