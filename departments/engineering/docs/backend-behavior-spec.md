@@ -1,52 +1,21 @@
-# Behavior Spec — derived (DRAFT, needs reconciliation)
+# Backend Behavior Spec — derived (Moat / Game / Edge)
 
-> **Provenance / health warning.** This spec was reverse-derived from the **`main`**
-> branch's docstrings, code comments, `supabase/migrations/*.sql`, and `CLAUDE.md`
-> during a test-independence audit (2026-07-22). It is a *positive statement of
-> intended behavior per domain* — the raw material for a real spec, not the spec
-> itself.
+> Filed from inbox `SPEC-behavior-derived.md`. This doc carries the **Moat**, **Game**, and
+> **Edge / Platform** sections — backend behavior, reverse-derived from the `main` branch's
+> docstrings, code comments, `supabase/migrations/*.sql`, and `CLAUDE.md` during a test-independence
+> audit (2026-07-22), reconciled against the `godot-pivot` branch (2026-07-23). It is a *positive
+> statement of intended behavior per domain* — the raw material for a real spec, not the spec itself.
 >
-> **Reconciled against the `godot-pivot` branch (2026-07-23).** The client-side
-> spec (`CLAUDE.md`, `docs/PLAN-godot.md` on that branch) has been folded in — see
-> the new **Client** section below and the penalty-freeze note under *Consequence
-> tick*. **Where the two disagreed, the branch's client spec wins.**
+> The **Client** section (screen surface, trust posture from the client's perspective, the open
+> weekly-loop product decisions) is filed separately as
+> `departments/game-design/docs/client-behavior-spec.md` — it's Unity-technical/game-design content,
+> not backend.
 >
-> **Client engine DECIDED 2026-07-28: Unity.** The Godot evaluation is
-> archived at git tag `archive/godot-pivot-phase1` (branch `godot-pivot` retained).
-> **Topology inverted the same day: Unity-as-base, not UaaL** — a partner studio
-> (`Get-Sweaty-Games/reign-and-gain`) owns and builds the entire Unity client, and
-> our Kotlin host ships to them as `hostbridge.aar`. Our own thin client shell was
-> deleted. See `docs/unity-plugin-topology.md` § Reversal.
-> Two things this does *not* mean, both load-bearing:
->
-> 1. **Nothing about the client is proven live on device.** The C# that existed in
->    this repo compiled clean on 2026-07-28, but that code is now deleted and the
->    client is being rebuilt by the partner against `docs/unity-client-brief.md`.
->    What is unproven is everything past the contracts: `hostbridge.aar` has not
->    been built, delivered, or loaded; the manifest-fragment launcher override has
->    not been exercised; no bridge round trip has run on real hardware. Deciding the
->    engine closed exactly one of the three conditions gating the release cluster;
->    see `docs/PLAN-closeout.md` Phase 5.
->
->    Recorded so it isn't "fixed" into a bug: that compile emits 6 `UAC1001`
->    serialization warnings on the nullable fields of `Bridge/RawHealthSignals.cs`.
->    They are **false alarms** — that DTO is deserialized only via Newtonsoft
->    (`GameBootstrap.cs:417,459`), never `JsonUtility`, and the nullability is
->    deliberate and load-bearing (`null` = signal absent vs `0.0` = a measured zero;
->    collapsing it would bias the evidence bundle). Do not "resolve" those warnings
->    by removing the `?`.
-> 2. **The § Client section below stays engine-neutral, deliberately.** It describes
->    *behavior*, and behavior did not change when the engine got picked. The
->    `godot-pivot`-derived content was folded in precisely *because* it was
->    engine-neutral, and it is still correct. Engine-specific plumbing (autoload/nav
->    design, the HTTP-layer sketch, the GDScript port gotchas) remains out of scope
->    here — that is implementation, not spec.
->
-> The Moat / Game / Edge sections remain **backend behavior derived from `main`**;
-> the branch's `CLAUDE.md` locks the same backend decisions, so nothing there
-> contradicted them. Sections were filled in one domain at a time by the agents that
-> audited `backend/src`; the Client section was added during the 2026-07-23
-> reconciliation.
+> Client engine decided 2026-07-28: Unity. Topology inverted the same day: Unity-as-base, not UaaL —
+> see `departments/engineering/docs/unity-plugin-topology-decision.md`. A partner studio
+> (`Get-Sweaty-Games/reign-and-gain`) owns and builds the entire Unity client; our Kotlin host ships
+> to them as `hostbridge.aar`. Nothing about the client is proven live on device yet — see
+> `docs/PLAN-closeout.md` Phase 5 in the backend repo.
 
 ---
 
@@ -130,8 +99,11 @@
 - Each session becomes a synthetic `tracked_gym_session` `EvidenceBundle`: `activityType = DISCIPLINE_ACTIVITY_TYPE[gym.discipline]`, `manualEntryFlag:true`, `gpsContext` = the gym's own coords with `accuracyMeters:0`, `metrics.durationSeconds` = the credited duration. `activityId = gymSessionId(userId, gymId, firstPingIso)` — a deterministic (non-cryptographic, format-only) UUID so re-finalizing the same session (concurrent tick + ping, crash-and-retry) upserts onto the same `activities` row instead of duplicating. Pings are claimed via `finalized_at IS NULL` update — awarded THEN marked, so a crash before the mark re-processes the same pings next run (idempotent). A deleted gym's pings still get marked finalized, just with no award (`sessionsFinalized` doesn't count them).
 - **Real periodic ping trigger — NOT YET IMPLEMENTED (blocker on this whole model reflecting a true session, tracked in `docs/TODO.md`):** the entire passive-session design above assumes pings arrive throughout a workout, but today only `GameBootstrap.cs`'s `BeginAppOpenPing` fires — one best-effort ping per app open, not a recurring one. **No periodic scheduling exists anywhere in `android-host`** (no `WorkManager`/`AlarmManager`/foreground service); the dev driver's `startGymTracking` mocks the intended 5-min cadence for dogfooding only. Until a real trigger is built, credited duration for a live session under-reports true time at the gym (it only spans whatever pings an app-open cadence happens to produce). The architecture choice is **no longer open** — resolved 2026-07-24 to a **host-side `WorkManager`** (Kotlin, engine-independent, survives backgrounding); an in-app engine-side timer was rejected as foreground-only, which defeats the purpose of passive sessions. See `docs/PLAN-closeout.md` Phase 4.
 - **Discipline variants** (`GYM_DISCIPLINES = strength|yoga|pilates|dance`, `user_gyms.discipline`, 0033/0034): `DISCIPLINE_ACTIVITY_TYPE` maps discipline → activity type 1:1 by name (identity mapping today, kept as a named seam). Reward then flows through the normal `ACTIVITY_STAT_AXIS`: `strength→STR`, `yoga→WIS`, `pilates→WIS`, `dance→DEX`. Discipline resolution precedence on venue creation: auto-detected (yoga/dance only, via Google Places `primaryType`) **wins over** the user's declared discipline, which wins over the `strength` default. Pilates is undetectable via Places (labeled generic `gym`) — it only ever lands via user declaration.
-- **Venue validation** (`validateVenue.ts`, hybrid, best-effort, NEVER throws — registration is best-effort so a broken provider degrades the result, never fails the caller): Tier 1 Overpass (keyless/free, OSM tags `leisure=fitness_centre|amenity=gym|sport=fitness` within 150m) → Tier 2 Google Places `searchNearby` (env-gated on `PLACES_API_KEY`, self-skips if unset) → escalates only if Tier 1 didn't validate. Each tier returns `true`(found)/`false`(clean negative)/`null`(couldn't answer — never counted as a negative). Result: any `true` → `"validated"`; no `true` but at least one clean `false` → `"unverified"`; every tier errored/skipped → `"pending"` (we know nothing). 3s per-request timeout via `AbortController`. A `"rejected"` (admin-only verdict) venue is intentionally never reused for a new registration at the same coords — a new registration there gets a fresh venue that re-runs auto-validation, since a legitimately different gym could have opened where a bogus one was rejected.
-- **registerUserGym** (`register_user_gym` RPC, migration 0039, venue/link split): `user_gyms` is a thin per-user link (id, user_id, venue_id) to the shared `gym_venues` table (coords, name, validation, discipline) — one venue row reused across every user who registers there, so validating one user's gym validates it for everyone linked. `GymService.registerGym` resolves the venue (reuse-nearby-inside-fence via `findNearbyVenue`, else create), dedups an already-linked venue before calling the RPC (repeat register of an owned gym never 409s even at the cap), and the RPC itself does the per-user cap check (`MAX_GYMS_PER_USER = 5`) + link insert atomically under a per-user advisory lock, returning an empty set when the cap is reached (mapped to `null` → route 409). A unique-constraint race (23505, concurrent register of the same venue) is caught and re-read as a normal dedup rather than propagated as an error. Deleting a link never deletes the venue (survives for every other user linked to it).
+- **Venue validation** (`validateVenue.ts`, hybrid, best-effort, NEVER throws — registration is best-effort so a broken provider degrades the result, never fails the caller): Tier 1 Overpass (keyless/free, OSM tags `leisure=fitness_centre|amenity=gym|sport=fitness` within 150m) → Tier 2 Google Places `searchNearby` (env-gated on `PLACES_API_KEY`, self-skips if unset) → escalates only if Tier 1 didn't validate. Each tier returns `true`(found)/`false`(clean negative)/`null`(couldn't answer — never counted as a negative). Result: any `true` → `"validated"`; no `true` but at least one clean `false` → `"unverified"`; every tier errored/skipped → `"pending"` (we know nothing). 3s per-request timeout via `AbortController`.
+- **`"pending"` is NOT terminal (issue #40).** `validateVenue` used to run exactly once, at creation, so a venue registered during a provider outage sat `pending` forever — and could not even be escalated by hand, because `requestVerification` only accepts `unverified`. The daily tick's **fourth independent sweep** (`gymService.retryPendingValidations`) re-asks the providers: `validation_status = 'pending'` and `validation_attempts < VALIDATION_MAX_ATTEMPTS (3)`, ordered by `last_validation_at` ascending with **nulls first** (a venue never re-asked has a null stamp and has waited longest of all), capped at `VALIDATION_RETRY_BATCH (20)` per run, and re-asked sequentially — this is a courtesy sweep against a free public provider, not a latency-sensitive path. On the 3rd attempt an outcome that is *still* `pending` is **forced to `unverified`**, because `unverified` is the entry point to human review and `pending` is not; without the force the client rule "offer VERIFY only on `unverified`" strands the venue permanently. The write carries `.eq("validation_status", "pending")`, so an admin verdict landing mid-sweep always wins: once the venue has left `pending` the update matches nothing and the automation claims nothing. Adds `venueValidationsRetried` to `TickResult`, counting only venues that actually **left** `pending`. A `"rejected"` (admin-only verdict) venue is intentionally never reused for a new registration at the same coords — a new registration there gets a fresh venue that re-runs auto-validation, since a legitimately different gym could have opened where a bogus one was rejected.
+- **Registration is a TWO-STEP picker flow, not a single POST (issue #40).** `GET /gyms/nearby?lat=&lng=` returns up to `NEARBY_LIMIT (3)` candidates within `NEARBY_RADIUS_M (200)`, nearest first, **merging** registered venues with Google Places results that no venue has claimed yet. A place already held by a registered venue is filtered out of the unknown set by `places_id`, so one real place yields exactly one row — a duplicate would let the user pick the "unknown" copy of a venue that already exists and fork its validation, which is the very thing the identity match above exists to prevent. The client then POSTs the chosen candidate. **The client must send the CHOSEN candidate's `lat`/`lng`, not the device's GPS pin** — this is the one part of the contract Swagger cannot express, and getting it wrong silently registers the first candidate no matter which row the player tapped. Communicated to the partner studio on `Get-Sweaty-Games/reign-and-gain-unity#308`.
+- **Known gap, NOT introduced by #40:** the identity guard only covers venues with a resolved `places_id`. Two concurrent registrations with **no** resolved place — local dev, or a real gym Google does not know — still both insert and still fork the venue by distance, exactly as before. Closing that needs a different constraint; a unique index cannot express "within N metres".
+- **registerUserGym** (`register_user_gym` RPC, migration 0039, venue/link split): `user_gyms` is a thin per-user link (id, user_id, venue_id) to the shared `gym_venues` table (coords, name, validation, discipline) — one venue row reused across every user who registers there, so validating one user's gym validates it for everyone linked. `GymService.registerGym` resolves the venue via `resolveVenue` — **identity before geometry (issue #40)**: `findVenueByPlacesId(place.placesId)` first, then reuse-nearby-inside-fence via `findNearbyVenue`, else create. Distance alone cannot tell two ends of one large building apart, which is how a single real gym ended up split across two venue rows that each collected half the community validation this venue/link split exists to share. The identity read is scoped `.neq("validation_status", "rejected")` and **must stay in agreement with migration `0058`'s PARTIAL unique index** on `places_id` (`where validation_status <> 'rejected'`) — the predicate is deliberate, since `findMatchingGym` never reuses a rejected venue and a rejected row keeps its `places_id`, so a table-wide unique would make a real gym opening where a bogus one was rejected unable to claim the same id; disagree and the insert following a miss throws. A concurrent registration of the same brand-new place is recovered by `adoptRacedVenue`: both callers miss the identity read, the loser's insert trips 23505, and it re-reads and adopts the winner's row. That recovery is narrow on purpose — only 23505, only with a resolved place, and never inventing a venue when the re-read comes back empty. `registerGym` then dedups an already-linked venue before calling the RPC (repeat register of an owned gym never 409s even at the cap), and the RPC itself does the per-user cap check (`MAX_GYMS_PER_USER = 5`) + link insert atomically under a per-user advisory lock, returning an empty set when the cap is reached (mapped to `null` → route 409). A unique-constraint race (23505, concurrent register of the same venue) is caught and re-read as a normal dedup rather than propagated as an error. Deleting a link never deletes the venue (survives for every other user linked to it).
 - **Admin resolution route exists and works today (verified 2026-07-23):** `POST /admin/gyms/:id/resolve` (`routes/gyms.ts`) is guarded by `isAdminRequest` (shared admin key, not `requireUser` — there's no user identity on this call) and calls `gymService.resolveValidation(id, status)` to set a venue to `validated`/`rejected`. **The queue has no listing consumer yet** — no route enumerates venues sitting in `pending`/`unverified`/`review_requested`; an operator needs the venue id from elsewhere (direct DB query) until a dashboard exists. Intended consumer: a future admin dashboard will list the queue and drive this same route — the resolve endpoint itself is already correct and does not need to change when that ships.
 
 ### Location capture — foreground-service model (AGREED — **NOT YET IMPLEMENTED**)
@@ -153,6 +125,7 @@
   an FGS started while the app is visible does not need it. Cost accepted: a **persistent
   notification while a session is active** (mandatory for any FGS; standard for run/gym trackers,
   and it clears when the session ends).
+
 **`tracked_run` lifecycle** — the FGS spans one run. Only *when* fixes are collected changes;
 the evidence-bundle shape and every server stage are untouched.
 
@@ -161,9 +134,9 @@ the evidence-bundle shape and every server stage are untouched.
    screen-off / app-backgrounded no longer stops sampling. This is the only stage this rule adds.
 3. **Stop** → `RunSessionTracker.stop()` stops the FGS and returns the raw window + samples, which
    assemble into a `tracked_run` bundle.
-4. **Ingest** — the bundle enters the standard pipeline **unchanged**. → *see the already-expanded
-   stages:* adjacent-fragment merge (*Ingest pipeline* step 4) and route scoring
-   (*Verification — checker contracts*, `TrackConsistencyChecker`).
+4. **Ingest** — the bundle enters the standard pipeline **unchanged**. See adjacent-fragment merge
+   (*Ingest pipeline* step 4) and route scoring (*Verification — checker contracts*,
+   `TrackConsistencyChecker`).
 
 **`tracked_gym_session` lifecycle** — a shift from fully-passive to a **user-started** session.
 The FGS session is *additive* client-side capture; the existing app-open passive ping and the
@@ -175,13 +148,13 @@ server finalizer are unchanged and remain the fallback.
 2. **Ping** (foreground *or* backgrounded) — a single-shot fix every `GYM_PING_INTERVAL_MS` →
    `POST /gyms/ping`, now continuing while backgrounded *during the session*. The legacy
    **app-open passive ping** stays as additive/fallback coverage, feeding the same `gym_pings`.
-3. **Group + finalize** — server-side, **unchanged**. → *see the already-expanded stage:*
-   *Gyms — session model* (passive ping model, `findMatchingGym`, departure detection /
-   `AWAY_PINGS_TO_CLOSE`, session grouping, credited duration). This rule changes only the
-   client-side ping cadence feeding that stage, never its logic.
+3. **Group + finalize** — server-side, **unchanged**. See *Gyms — session model* (passive ping
+   model, `findMatchingGym`, departure detection / `AWAY_PINGS_TO_CLOSE`, session grouping, credited
+   duration). This rule changes only the client-side ping cadence feeding that stage, never its
+   logic.
 4. **Ingest** — each finalized session becomes a synthetic `tracked_gym_session` bundle → standard
-   pipeline. → *see:* *Gyms — session model* (synthetic bundle assembly) and *Ingest pipeline*
-   step 5 (gym-discipline override).
+   pipeline. See *Gyms — session model* (synthetic bundle assembly) and *Ingest pipeline* step 5
+   (gym-discipline override).
 
 - **Rejected alternatives:** geofencing or periodic background location (the "right" tool for
   truly app-*closed* gym detection) both require `ACCESS_BACKGROUND_LOCATION` — a new runtime
@@ -572,9 +545,10 @@ deliberate deferrals — so they don't get mistaken for missing behavior later.
 > grace-window reversal) are the **preserved-for-future-use** shape, not a live-credited loop. What
 > stays live: the **tick still runs and still detects shortfalls** — detection acts on absence, and
 > only a scheduled job can see a miss, so it must keep running. *Design consequence:* with penalties
-> dormant the loop has no downside, so the client's **Home surfaces the weekly-target visibly
-> resetting** (progress → zero, days-remaining) as the one surviving tension signal — see the Client
-> section. `weekly_target = 0` remains the intentional rest-week opt-out.
+> dormant the loop has no downside, so the client's Home surfaces the weekly-target visibly
+> resetting (progress → zero, days-remaining) as the one surviving tension signal — see
+> `departments/game-design/docs/client-behavior-spec.md`. `weekly_target = 0` remains the
+> intentional rest-week opt-out.
 
 - Detects **absence**, not presence — a missed weekly target is a non-event only a scheduled job can catch, which is why this is the component most likely to break silently.
 - For each profile, evaluates the **most recently CLOSED local week** in that user's own timezone (`profiles.timezone`) relative to `weekStartsOn` (gameconfig `consequence.params.weekStartsOn`, default **1 = Monday**). Cadence-robust: however late/infrequently the tick runs, it always evaluates the last full week — a multi-week outage self-heals by evaluating only the latest closed week on recovery, deliberately not stacking stale penalties.
@@ -593,6 +567,8 @@ deliberate deferrals — so they don't get mistaken for missing behavior later.
 - **Scenario reconciliation — the gold-loss penalty is NOT applied or reversed today, and that stays the target (penalty freeze upheld, 2026-07-23).** The "miss target → lose gold" / "late data → gold refunded" scenarios describe the *preserved-for-future* mechanic, **not** current or intended MVP behavior. The tick keeps *detecting* shortfalls (above); the anti-stacking and grace-reversal logic stay in code but dormant; Home's visibly-resetting weekly target remains the sole surviving tension signal.
 - One bad user (corrupt timezone, transient error) is caught, logged, and skipped per-profile — never aborts the whole sweep.
 - Gym-session finalization (`gymSessionFinalizer.finalizeStaleSessions`) runs as an **independent sweep with an independent failure mode** at the end of `run()` — a bug there must never abort the consequence sweep, which is the more important half of this job.
+- **There are four sweeps, each with its own try/catch**, in order: the per-profile consequence loop, gym-session finalization, guild leadership succession (`succeedInactiveLeaders`), and pending-venue revalidation (`retryPendingValidations`). Isolation has to hold in **both** directions — the venue sweep runs last, so a shared try/catch would silently make it the first casualty of any earlier failure while still reporting a plausible-looking zero.
+- **The tick's failure signal is its EXIT CODE, and it used to lie.** Because all four sweeps catch-and-continue, `run()` resolves even when every user failed, and `runTick.ts` unconditionally exited 0 — so Render's cron reported success on a totally failed sweep. `TickResult` now carries `failures`, incremented in each of the four catches, and `runTick` exits 1 when it is non-zero. A dedicated counter is required rather than reading the existing ones: each of `gymSessionsFinalized` / `leadershipSuccessions` / `venueValidationsRetried` reads `0` both when its sweep failed and when it simply had nothing to do. **There is still no alarm** — nothing watches that exit code and tells anyone.
 
 ### Weekly-target reward (migration `0047` + `WeeklyRewardService` — **SHIPPED**, task 1e)
 
@@ -672,7 +648,7 @@ penalties dormant this is the **only** live consequence of the weekly loop.
   **on hold and may be cut entirely**; do not build against it, and treat the shape below as
   preserved-for-possible-future-use, not a committed feature. It is **not** part of the near-term
   guild scope (create/join/invite/members + referral, which stay live). If the weekly-loop
-  decisions land on a different guild payoff (see *Client → weekly loop*), the boss is dropped.
+  decisions land on a different guild payoff, the boss is dropped.
   - *Preserved shape (if it ever ships):* **boss HP is derived, never stored** —
     `guild_boss_contributions` is an append-only ledger; `bossHpRemaining = startHp −
     SUM(contributions)`, no mutable boss row (no write contention, full history for accountability).
@@ -747,7 +723,7 @@ penalties dormant this is the **only** live consequence of the weekly loop.
 
 ### Notifications (`NotificationService`) — FCM push, built (commit `e54ee90`, round-trip proven 2026-07-28)
 
-- **Push delivery via FCM (Android); APNs (iOS) deferred with iOS itself.** `backend/src/services/account/notification/NotificationService.ts` fans out server-side; registering/refreshing the platform push token is **host-owned** (§ Client → the host does "push, lifecycle").
+- **Push delivery via FCM (Android); APNs (iOS) deferred with iOS itself.** `backend/src/services/account/notification/NotificationService.ts` fans out server-side; registering/refreshing the platform push token is **host-owned** (the client-side half is documented in `departments/game-design/docs/client-behavior-spec.md`).
 - **Token storage**: `device_tokens (user_id, platform ∈ {ios, android}, token unique)` (0001) — an **owner-writable exception** to the read-only RLS posture (client manages its own token directly via `_own` insert/select/delete policies; cascade-deletes with the profile).
 - **`sendLossAversionReminder(userId)` and `sendGuildShieldAlert(guildId)` remain stubs that `throw "Not implemented"` — still correctly blocked.** Both presuppose FROZEN mechanics: the loss-aversion penalty loop (§ Consequence tick) and the guild world boss (§ Guild, frozen and may not ship). Left unbuilt on purpose; building either would contradict the freeze.
 - **Two non-frozen nudges ship instead, both tied to `weekly_target`** (the one surviving tension signal that isn't behind a freeze) and hooked into the daily sweep (`dailyTick.ts`):
@@ -790,51 +766,3 @@ Confirmed on-device: notification now clears on "Stop gym tracking."
 - **`find_user_id_by_email(p_email text) → uuid`** (0037, `language sql`, `security definer`) — bridges the PostgREST-inaccessible `auth` schema. Case-insensitive on both sides (`lower(email) = lower(p_email)`). No match → `null` (not an error). `limit 1` with no `order by`, so two lowercase-colliding emails would return a **non-deterministic** row — relies on Supabase enforcing email uniqueness upstream. Feeds the irreversible account-delete path: a wrong return here deletes the wrong account.
 - **`current_user_guild_id() → uuid`** (0001, `stable`, `security definer`, no args) — `select guild_id from guild_members where user_id = auth.uid()`. Keys solely off `auth.uid()` (can't be manipulated by passed input); `guild_members.unique(user_id)` guarantees at most one row → well-defined scalar. Feeds three RLS policies. Too-permissive = cross-guild **data leak**; too-restrictive = member locked out of their own guild (functional bug, not a leak). Unauthenticated (`auth.uid()` null) → `null` → guild-scoped selects return empty, not an error.
 - **`handle_new_user()` + trigger `on_auth_user_created`** (0001, `after insert on auth.users`, `security definer`) — bootstraps a new user in the signup transaction (all-or-nothing with the `auth.users` insert): one `profiles` row (`display_name` null, `timezone='UTC'`, `weekly_target=3`) and one `characters` row (`level=1, xp=0, gold=0, str=dex=con=wis=0`). Cascade on delete: `profiles.id → auth.users.id ON DELETE CASCADE`, `characters.user_id → profiles.id ON DELETE CASCADE` — the mechanism that makes one `admin.deleteUser` cleanly remove every downstream row.
-
----
-
-## Client
-
-> Folded in from the `godot-pivot` branch's client spec (2026-07-23), stated **engine-neutrally**.
-> The engine is now decided — **Unity, 2026-07-28**, built by a partner studio under the
-> Unity-as-base topology — but this section stays engine-neutral on purpose: it describes behavior,
-> and behavior changed neither when the engine got picked nor when the topology inverted. Keeping it
-> that way is also what keeps it honest about the trust boundary, which is a property of the
-> architecture rather than of the engine — a Kotlin plugin `.aar` is still native code outside the
-> IL2CPP runtime, so the host-owned refresh-token guarantee is untouched by the flip. Engine-specific plumbing (autoloads, nav/back-stack, the
-> per-request HTTP layer, the GDScript/C# port gotchas) is implementation and deliberately **not**
-> specified here.
-
-### Trust posture (client is untrusted — applies to every screen)
-
-- The client **assembles an evidence bundle of raw signals and displays server-returned numbers**. It never computes an award, a trust score, or a reward. This holds identically for the meta systems (Roster/skill-tree, Game campaign) as for the Home workout loop — a mock returning a number is a **placeholder for a server response, never a client-side formula that later gets "promoted."**
-- The one client-side numeric operation that touches rewards is presentational: the **claim count-up** animates from the pre-claim snapshot to the post-claim snapshot. Both numbers come from the server (`GET /state`), so it is a diff of **two server snapshots** — the trust boundary is untouched.
-- `GET /state` is the single snapshot feeding the render layer; the client re-derives no progression formula.
-
-### Auth / token split (host-owned refresh)
-
-- The native **host** (Kotlin) does platform-native work only: health read → raw signals, OS permissions, hardware-backed token storage, **token refresh**, push, lifecycle. **App networking (`GET /state`, evidence upload) and the interactive OAuth login live in the client layer**, not the host.
-- The one auth exception: **the host owns the token-refresh call.** The client performs interactive login and hands the initial access+refresh pair to the host in a single expression; the host stores both hardware-backed, silently refreshes against Supabase's token endpoint on access-token expiry, and exposes only the *current access token* to the client. **The refresh token is never retained, persisted, logged, or read back in client managed memory** — it transits the login response once and goes straight into host storage. This is the whole point of host-owned refresh: the long-lived crown jewel stays out of the most decompilable layer.
-- **401 policy: never auto-relogin.** A 401 latches once (concurrent 401s from a fan-out act once), drops the user to the login/splash gate, and waits for a user gesture — an app-focus re-sync fires with no gesture, and the OS credential sheet throttles after repeated dismissals.
-
-### Screen surface + scope
-
-- **18 screens, tab bar Home / Roster / Game / Guild.** **Portrait-locked, phone-only** — a stated constraint (no tablet, no landscape, no light/dark theming, English strings inline).
-- **Backend-backed today:** Home (weekly-target hub + claim), sources, profile/name edit, settings, gyms, and the real half of Guild (create/join/invite/members).
-- **Zero backend — mocked, quarantined:** **Roster/skill-tree**, **Guild weekly-credits**, and the **Game chapter campaign**. These have no tables, no routes, no `GameConfig` entries. They render against quarantined mock data so UI shape can be validated first; going real is a per-function swap to an API call with the screens unchanged. **The mock shape is not the API contract** — a separate backend design pass derives the schema and the mock adapts to it, never the reverse.
-- **No offline queue / cache and no generic HTTP retry.** Every screen is server-backed (no signal ⇒ dead screen, accepted for MVP). Retry is user-visible only, because `POST /activities` is idempotent and register is exactly-once but `POST /guilds` is neither — a blanket retry would create duplicate guilds.
-
-### The weekly loop — four product decisions (OPEN — **NEEDS USER DECISION**)
-
-The three mocked meta systems all hang off one question — *"what is the weekly loop?"* — which `profiles.weekly_target` already anchors server-side. **These must be answered before the mocks are written**, since they determine the eventual schema, and each must be answered as *one* coherent loop (everything meta resolves at the weekly boundary), not four unrelated fictions. Recommended shapes below; the **numbers/cadence are the founders' call**. Whichever way they land, the trust boundary is unchanged — the server computes the value, the client displays it.
-
-- **Guild bonus → flat, per-member-who-hit-target, capped** (recommended). Scaled/contribution-weighted bonuses punish being in a guild with a slow member and create a "carry" dynamic — backwards for a product selling accountability. *UI:* Guild is N lit/dim slots + one number. **The number is open.**
-- **Builds → earned by completing a week, not bought with gold** (recommended). Routing acquisition through the verified workout (the moat), not a second currency, avoids a farmable economy loop while checkers are dormant. *UI:* a pick-one-of-three choice on week completion. **Cadence (every week vs milestone weeks) is open.**
-- **Respec → free, at week boundaries only** (recommended). Irreversible trees make players avoid the tree; a paid respec is monetization this MVP lacks. *Schema note:* respec-able builds need an **owned-instance table, not a template column** — the template-vs-instance split (see CLAUDE.md / Moat) governs.
-- **Battle → deterministic stat check, server-resolved, no combat resolver** (recommended). Answers "did my workouts make me stronger?" with a stat comparison in one screen; collapses the preview→fight split into a two-column comparison (effective stats vs the level's requirement) + one outcome.
-
-### Backend design pass (not yet scoped)
-
-Roster/skill-tree, guild weekly credits, and the chapter campaign require a **data-model + API design pass** (tables, routes, `GameConfig` entries) that does not exist yet. It is backend work sized separately and **blocked on the four decisions above**, since they determine the schema.
-
----
