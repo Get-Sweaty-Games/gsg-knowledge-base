@@ -1,6 +1,9 @@
 # Claude Code local settings (per-machine only — .claude/skills/ IS committed and shared)
 .claude/settings.local.json
 
+# Session handoff notes (Claude Code /handoff) — per-machine working state, not project history
+HANDOFF.md
+
 # Node dependencies (not currently used, kept for safety)
 node_modules/
 

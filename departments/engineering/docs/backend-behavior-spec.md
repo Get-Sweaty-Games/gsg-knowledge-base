@@ -604,9 +604,12 @@ penalties dormant this is the **only** live consequence of the weekly loop.
 - **Level scaling is wired but inert.** `multiplier = level ^ levelGrowth` (`levelGrowth` default
   1). `characters.level` is `default 1` and **no production code increments it**, so every payout is
   1× today. The hook is intentional — it activates when level-up ships, with no formula change.
-- **`itemTemplateKey` / `skillKey` are recorded intent only — nothing grants them.** There is no
-  `skills` table and nothing writes `inventory_items`. Do not read a non-null key as an item having
-  been handed out.
+- **`itemTemplateKey` / `skillKey` are recorded intent only — nothing grants them.** Nothing writes
+  `inventory_items` from this path, and this reward source cannot hand out a skill-tree node. Do not
+  read a non-null key as an item or a node having been handed out. **This is a different `skills` than
+  the skill tree below** — the tree's currency is the `str`/`spd`/`wis`/`jkr` axes themselves, which
+  this reward already credits directly via `stats`; a non-null `skillKey` here is unwired intent for a
+  future unlock-as-reward path, not a pointer into `skill_purchases`.
 - **Claiming is player-triggered, never automatic.** `POST /rewards/claim` → RPC
   `claim_weekly_reward(p_user_id, p_cutoff_date)`: advisory lock, then one statement flips every
   eligible `pending` row to `'claimed'` and sums its `reward_detail`, then credits `characters`.
@@ -641,6 +644,55 @@ penalties dormant this is the **only** live consequence of the weekly loop.
   the same zero-row-UPDATE shape — closed in migration `0048`** with the identical guard. There it was
   worse: without it, the pending `activities` rows still flipped to `registered = true` after the
   no-op credit, permanently burning the award rather than just the ledger entry.
+
+### Skill tree (migrations 0059 + 0063, `SkillService` — SHIPPED)
+
+Persistent meta-progression that spends the same `str`/`spd`/`wis`/`jkr` axes the weekly reward and
+activity awards credit. Closes backend issue #74: the client used to keep its own in-memory ledger of
+what it had spent that session, which died with the process and re-offered every purchased node on
+the next launch. Full announcement (contract, rationale, what the client must change) is posted on
+`Get-Sweaty-Games/reign-and-gain-unity#130`; this section is the durable record of the same facts.
+
+- **One append-only ledger, everything else derived.** `skill_purchases (purchase_id, user_id,
+  skill_id, level, coin_axis, price)`. Owned nodes, per-node level, and per-axis spend all come from
+  summing this table — never a second mutable copy kept in step by hand. The whole tree costs 19
+  points per class, so a maxed account holds 57 rows and never grows further.
+- **Spend is recorded, not derived from ownership.** A node can be paid for with its own class token
+  **or** the wild (`jkr`), so summing the prices of owned nodes gives the wrong answer for every
+  wild-paid purchase. `coin_axis` is what actually left the player's hand, one column, not inferred.
+- **The tree and its rules are TypeScript, not `gameconfig`** (`domain/skillTree.ts` +
+  `domain/skillRules.ts`) — the same call migration 0059 made when it deleted `kinetic.statAxis`.
+  Adjacency and tiers are structural, not tuning knobs; a live-editable row could only disagree with
+  the shipped client. Refusal strings are copied verbatim from the client's own `ProgressionRules.cs`,
+  so the sentence the server returns is the one the tree screen already draws.
+- **`GET /skills/tree` publishes the table itself** — 63 nodes across three classes
+  (warrior/rogue/mage), each carrying `tier`, `prerequisites` (ANY-of, not all-of), `startsOwned`,
+  `upgradeable`, precomputed `maxLevel` (`6 - tier`, so every node converges on effective tier 5), and
+  `unlockCost`/`upgradeCosts`. Static — one frozen response, fetch once per launch. This is what
+  actually removes drift: two copies of a tree drift, one authoritative copy cannot.
+- **`POST /skills/purchase`**: `{ purchaseId, skillId, intent, coin }`. `purchaseId` is a
+  client-minted idempotency key exactly like `activityId` — global, not per-user, since a per-user key
+  would let a second account re-spend an id it merely observed. `intent` (`unlock`/`upgrade`) is
+  checked, not trusted: a client that believes it is unlocking can never silently be charged for an
+  upgrade. 201 charged, 200 replay, both returning the next `progression` snapshot.
+- **Rules in the service, money in SQL.** The `purchase_skill` RPC (plain, not `SECURITY DEFINER`)
+  owns only the charge and the exactly-once guarantee:
+  - `unique (user_id, skill_id, level)` is the race guard against a double unlock or a double upgrade
+    to the same level — two concurrent requests both pass the rules check against the same pre-state,
+    exactly one insert survives, the other catches `unique_violation` and answers `conflict`.
+  - `pg_advisory_xact_lock(hashtext('skill_purchase:' || user_id))` plus an in-lock balance read
+    guards two purchases that are each affordable alone but not together.
+  - Adjacency and the level gate are **not** lock-guarded — owned counts only ever grow, so a race
+    there can only be raced conservatively (refuses rather than over-grants), and does not need one.
+- **`GET /state`'s `progression` block**: `{ balances, spent, owned }`. `balances` is
+  `earned − spent`, floored at 0, and is deliberately smaller than `character.stats` — the stats are
+  lifetime-earned totals nothing decrements; `balances` is what is left to spend. Render pills from
+  `balances`, never from `stats`.
+- **Nine starter nodes are seeded in code, not rows** (`w1 w7 w8`, `r1 r6 r8`, `m1 m8 m4`) — avoids a
+  signup-trigger change and a backfill over every existing account. They appear in `owned` with no
+  purchase behind them.
+- **Node display names and combat values stay client-side.** The server publishes shape (adjacency,
+  costs, ceilings) and owns the ledger; it does not own presentation.
 
 ### Guild + referral
 

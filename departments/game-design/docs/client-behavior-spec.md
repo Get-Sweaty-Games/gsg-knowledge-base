@@ -22,7 +22,7 @@
 
 ## Trust posture (client is untrusted — applies to every screen)
 
-- The client **assembles an evidence bundle of raw signals and displays server-returned numbers**. It never computes an award, a trust score, or a reward. This holds identically for the meta systems (Roster/skill-tree, Game campaign) as for the Home workout loop — a mock returning a number is a **placeholder for a server response, never a client-side formula that later gets "promoted."**
+- The client **assembles an evidence bundle of raw signals and displays server-returned numbers**. It never computes an award, a trust score, or a reward. This holds identically for the meta systems (Roster/skill-tree, Game campaign) as for the Home workout loop — a mock returning a number is a **placeholder for a server response, never a client-side formula that later gets "promoted."** Roster/skill-tree has since graduated from mock to a real backend (see below) without this rule changing: the server owns the tree's ledger, the client renders and asks.
 - The one client-side numeric operation that touches rewards is presentational: the **claim count-up** animates from the pre-claim snapshot to the post-claim snapshot. Both numbers come from the server (`GET /state`), so it is a diff of **two server snapshots** — the trust boundary is untouched.
 - `GET /state` is the single snapshot feeding the render layer; the client re-derives no progression formula.
 
@@ -35,13 +35,13 @@
 ## Screen surface + scope
 
 - **18 screens, tab bar Home / Roster / Game / Guild.** **Portrait-locked, phone-only** in this spec's original framing — **superseded by the B1 orientation decision** (landscape everywhere, including the splash) — see `departments/game-design/docs/unity-integration-owner-decisions.md`. Other stated constraints stand: no tablet support, no light/dark theming, English strings inline.
-- **Backend-backed today:** Home (weekly-target hub + claim), sources, profile/name edit, settings, gyms, and the real half of Guild (create/join/invite/members).
-- **Zero backend — mocked, quarantined:** **Roster/skill-tree**, **Guild weekly-credits**, and the **Game chapter campaign**. These have no tables, no routes, no `GameConfig` entries. They render against quarantined mock data so UI shape can be validated first; going real is a per-function swap to an API call with the screens unchanged. **The mock shape is not the API contract** — a separate backend design pass derives the schema and the mock adapts to it, never the reverse.
+- **Backend-backed today:** Home (weekly-target hub + claim), sources, profile/name edit, settings, gyms, the real half of Guild (create/join/invite/members), and **Roster/skill-tree** (`GET /skills/tree`, `POST /skills/purchase` — see `departments/engineering/docs/backend-behavior-spec.md` § Skill tree). Balances read from `progression.balances` on `GET /state`, never from `character.stats`. Node display names and combat values still stay client-side; the server owns only the ledger and the tree's shape.
+- **Zero backend — mocked, quarantined:** **Guild weekly-credits** and the **Game chapter campaign**. These have no tables, no routes, no `GameConfig` entries. They render against quarantined mock data so UI shape can be validated first; going real is a per-function swap to an API call with the screens unchanged. **The mock shape is not the API contract** — a separate backend design pass derives the schema and the mock adapts to it, never the reverse.
 - **No offline queue / cache and no generic HTTP retry.** Every screen is server-backed (no signal ⇒ dead screen, accepted for MVP). Retry is user-visible only, because `POST /activities` is idempotent and register is exactly-once but `POST /guilds` is neither — a blanket retry would create duplicate guilds.
 
 ## The weekly loop — four product decisions (OPEN — NEEDS FOUNDER DECISION)
 
-The three mocked meta systems all hang off one question — *"what is the weekly loop?"* — which `profiles.weekly_target` already anchors server-side. **These must be answered before the mocks are written**, since they determine the eventual schema, and each must be answered as *one* coherent loop (everything meta resolves at the weekly boundary), not four unrelated fictions. Recommended shapes below; the **numbers/cadence are the founders' call**. Whichever way they land, the trust boundary is unchanged — the server computes the value, the client displays it.
+The two still-mocked meta systems (Guild weekly-credits, Game chapter campaign) hang off one question — *"what is the weekly loop?"* — which `profiles.weekly_target` already anchors server-side. **These must be answered before the mocks are written**, since they determine the eventual schema, and each must be answered as *one* coherent loop (everything meta resolves at the weekly boundary), not unrelated fictions. Recommended shapes below; the **numbers/cadence are the founders' call**. Whichever way they land, the trust boundary is unchanged — the server computes the value, the client displays it.
 
 - **Guild bonus → flat, per-member-who-hit-target, capped** (recommended). Scaled/contribution-weighted bonuses punish being in a guild with a slow member and create a "carry" dynamic — backwards for a product selling accountability. *UI:* Guild is N lit/dim slots + one number. **The number is open.**
 - **Builds → earned by completing a week, not bought with gold** (recommended). Routing acquisition through the verified workout (the moat), not a second currency, avoids a farmable economy loop while checkers are dormant. *UI:* a pick-one-of-three choice on week completion. **Cadence (every week vs milestone weeks) is open.**
@@ -54,4 +54,9 @@ resolved.
 
 ## Backend design pass (not yet scoped)
 
-Roster/skill-tree, guild weekly credits, and the chapter campaign require a **data-model + API design pass** (tables, routes, `GameConfig` entries) on the backend that does not exist yet. It is backend work sized separately and **blocked on the four decisions above**, since they determine the schema.
+Guild weekly credits and the chapter campaign still require a **data-model + API design pass**
+(tables, routes, `GameConfig` entries) on the backend that does not exist yet. It is backend work
+sized separately and **blocked on the four decisions above**, since they determine the schema.
+Roster/skill-tree no longer belongs to this list — its design pass happened and shipped (see
+Screen surface + scope above); it was never gated on these four weekly-loop decisions in the first
+place, since the tree's currency (workout-earned axis tokens) was settled independently.
