@@ -106,12 +106,11 @@ Not optional paperwork — all of this before the first event leaves the device:
   hand" false; leaving the free plan raises retention to 90 days or a year and makes the published
   policy text wrong. Retention changes are NOT retroactive either, so recordings keep the window they
   were captured under. Revisit on either trigger.
-- **STILL OPEN.** A Play Data Safety amendment — App activity → App interactions, declared as both
+- **DONE.** A Play Data Safety amendment — App activity → App interactions, declared as both
   collected AND shared, since Google's own definition of that category names screenshots. It was
   deliberately deferred while the closed-testing release sat in Google's review queue, because filing a
-  change during a pending review can push the app to the back of it. **That release published on
-  2026-08-18, so the reason for waiting is gone** — the queue is empty and this is the cheap moment to
-  file. Verify the actual field names against a real device event before filing, don't assume.
+  change during a pending review can push the app to the back of it. Filed on 2026-08-18, after that
+  release published and the queue was empty.
 - **DONE.** Disable log-based event capture explicitly, or the free tier dies in week one (53
   `Debug.LogError` sites in the client). `CaptureLogs` is pinned off in `PostHogBootstrap`, alongside
   three flags that default ON and would each have undone a decision already made — `CaptureExceptions`
