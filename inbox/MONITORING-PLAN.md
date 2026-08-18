@@ -84,22 +84,40 @@ did not previously name.
 
 ## If a client-side vendor is ever added (PostHog, etc.)
 
-**This happened, partially, on 2026-08-18** — see the correction above. The checklist below predates
-that landing and has not been re-audited item by item against it; the one item confirmed is the Play
-Data Safety line, addressed in place below. Treat the rest as unverified rather than assume any of them
-were done as part of the session-replay landing.
+**This happened on 2026-08-18** — see the correction above. The checklist was written before that
+landing and has now been walked item by item against it. Status is recorded per item rather than in a
+summary line, because the two that remain open are the two that matter.
 
 Not optional paperwork — all of this before the first event leaves the device:
-- Signed DPA naming the vendor as processor.
-- Sub-processor list update in `PrivacyPage.tsx` — a different repo with its own deploy, can't land
-  atomically with the code change.
-- The `PrivacyPage.tsx` analytics-SDK sentence, which currently forbids exactly this.
-- An account-deletion call to the vendor — Supabase's delete cascade doesn't reach a third party.
-- A Play Data Safety amendment (crash logs / diagnostics / device IDs) — verify the actual field names
-  on a real device event before filing, don't assume. **Deliberately NOT submitted as of 2026-08-18** —
-  the feature ships live but dark instead (`posthogApiKey` blank in `appconfig.json`, which
-  `PostHogBootstrap` treats as the off switch): filing a Data Safety amendment while the closed-testing
-  release's own review is already in Google's queue risks pushing that pending review to the back of it,
-  so the declaration waits for a moment with no review in flight.
-- Disable log-based event capture explicitly, or the free tier dies in week one (53
-  `Debug.LogError` sites in the client).
+- **DONE.** Signed DPA naming the vendor as processor. PostHog's is self-serve: generate, e-sign and
+  download a countersigned copy at `app.posthog.com/legal`. The text published at `posthog.com/dpa` is
+  a non-binding preview and is NOT the agreement — only the in-app generated copy is.
+- **DONE.** Sub-processor list update in `PrivacyPage.tsx` — a different repo with its own deploy, can't
+  land atomically with the code change. PostHog was added to "Who we share it with", and the count in
+  that paragraph went from two providers to three; the count is the part a reader notices is wrong.
+- **DONE.** The `PrivacyPage.tsx` analytics-SDK sentence, which used to forbid exactly this.
+- **NOT BUILT, deliberately, and the reasoning is time-boxed.** An account-deletion call to the vendor —
+  Supabase's delete cascade doesn't reach a third party. PostHog CAN delete a person with
+  `delete_recordings=true`, or one recording by id, so the pipeline is buildable: the client can read
+  `PostHog.DistinctId`, the backend could store it and call the API inside `verifyAndDelete`. It was not
+  built because **the free plan caps recording retention at 30 days** and the cohort is 12-50 people, so
+  a manual erasure route (email in, find by nickname and date, delete) covers the case for less work
+  than the pipeline. **Both halves of that argument are conditional.** A larger cohort makes "find it by
+  hand" false; leaving the free plan raises retention to 90 days or a year and makes the published
+  policy text wrong. Retention changes are NOT retroactive either, so recordings keep the window they
+  were captured under. Revisit on either trigger.
+- **STILL OPEN.** A Play Data Safety amendment — App activity → App interactions, declared as both
+  collected AND shared, since Google's own definition of that category names screenshots. It was
+  deliberately deferred while the closed-testing release sat in Google's review queue, because filing a
+  change during a pending review can push the app to the back of it. **That release published on
+  2026-08-18, so the reason for waiting is gone** — the queue is empty and this is the cheap moment to
+  file. Verify the actual field names against a real device event before filing, don't assume.
+- **DONE.** Disable log-based event capture explicitly, or the free tier dies in week one (53
+  `Debug.LogError` sites in the client). `CaptureLogs` is pinned off in `PostHogBootstrap`, alongside
+  three flags that default ON and would each have undone a decision already made — `CaptureExceptions`
+  most of all, which is not gated by `CrashReportingConsent` and would have kept reporting a player who
+  had switched crash reporting off.
+
+**One item nobody put on this list, and it applies to every future vendor:** set the retention period
+explicitly rather than accepting the project default. The privacy policy now states a 30-day figure, so
+that setting is load-bearing text rather than a preference.
