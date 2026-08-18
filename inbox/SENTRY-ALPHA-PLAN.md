@@ -4,6 +4,12 @@
 called the same day; versionCode 296 (`65fc859`) is **live on Play's internal track**, confirmed by a
 direct read of the track state (`status: "completed"`, not just uploaded).
 
+**Correction (2026-08-18):** the paragraph below claiming the Foreground Service declaration was
+answered for versionCode 296 is **false**. The owner confirmed directly that he had never filled in
+the declaration before this session — it was recorded and submitted for the first time on 2026-08-18,
+against issue #363. `edits:commit` on 296 must have succeeded some other way; whatever unblocked it,
+it was not the FGS declaration.
+
 ## What's live
 
 - Sentry Unity SDK 4.8.0, pinned via git URL in `Packages/manifest.json` (not OpenUPM — tops out at
@@ -15,17 +21,16 @@ direct read of the track state (`status: "completed"`, not just uploaded).
   review queue must not gate crash reporting.
 - **Also live on Play's internal track**, versionCode 296 (`65fc859`), release notes "Introducing
   monitoring by sentry. Bunch of UI and game improvements." First `edits:commit` attempt 403'd on the
-  unanswered Foreground Service declaration, exactly as predicted by the GO/NO-GO plan; the
-  declaration was then answered directly in Play Console (no git trace by nature) and a second
-  `scripts/upload-play.js` run committed cleanly. **Verified independently**, not just from the
+  unanswered Foreground Service declaration, exactly as predicted by the GO/NO-GO plan; a second
+  `scripts/upload-play.js` run later committed cleanly. **Verified independently**, not just from the
   script's own output — a read-only `edits.tracks.get` call returned
   `{"track":"internal","releases":[{"versionCodes":["296"],"status":"completed"}]}`.
 
-  **Open discrepancy:** issue #363 (tracks capturing the two `adb screenrecord` demo videos Google's
-  form can ask for) is still **open** on GitHub even though the console declaration was clearly
-  answered — the commit would not have succeeded otherwise. Either the video evidence wasn't required
-  this time, or it's still owed. Don't close #363 on the strength of this alone — check what was
-  actually submitted in Play Console first.
+  **Corrected (2026-08-18):** the declaration was **not** answered before that second commit. The
+  owner confirmed he never filled it in until this session, when it was recorded and submitted
+  against issue #363 for the first time. Whatever made the second `edits:commit` succeed, it was not
+  the FGS declaration — #363 stays open until Google's review of the now-submitted declaration
+  clears, and that review is a separate, still-unresolved question from why 296 committed.
 
 ### Configuration (`Assets/Resources/Sentry/SentryOptions.asset`)
 
@@ -118,9 +123,10 @@ throwaway-branch event, resolved to `GameRoot.cs:11746`.
   reach a crash report at all needs a real answer before public launch. Deliberate deferral for the
   alpha (team + small invited cohort, EU hosting, no account id at Sentry, signed DPA).
 - **Written legitimate-interest assessment — not written.** The owner's own task, ~2 hours.
-- **No persisted consent surface.** `PermissionGate.cs` is an explainer modal with no persisted choice
-  or Settings toggle — can't be retrofitted onto crashes already collected. Accepted ceiling of the
-  legitimate-interest approach for now.
+- **Corrected (2026-08-18): a persisted consent surface exists.** `CrashReportingConsent.cs`
+  (`Assets/Scripts/Bootstrap/`) shipped under #351, wired at `AppRoot.Device.cs:84` and pinned by
+  `SentryConfigTests`. This bullet's original claim of no persisted choice or Settings toggle was
+  false as of this file's last edit.
 - **Play closed-testing (12 testers × 14 days) — not started**, queued behind the FGS review, which
   has no timeline Google will commit to.
 
