@@ -96,16 +96,32 @@ Not optional paperwork — all of this before the first event leaves the device:
   land atomically with the code change. PostHog was added to "Who we share it with", and the count in
   that paragraph went from two providers to three; the count is the part a reader notices is wrong.
 - **DONE.** The `PrivacyPage.tsx` analytics-SDK sentence, which used to forbid exactly this.
-- **NOT BUILT, deliberately, and the reasoning is time-boxed.** An account-deletion call to the vendor —
-  Supabase's delete cascade doesn't reach a third party. PostHog CAN delete a person with
-  `delete_recordings=true`, or one recording by id, so the pipeline is buildable: the client can read
-  `PostHog.DistinctId`, the backend could store it and call the API inside `verifyAndDelete`. It was not
-  built because **the free plan caps recording retention at 30 days** and the cohort is 12-50 people, so
-  a manual erasure route (email in, find by nickname and date, delete) covers the case for less work
-  than the pipeline. **Both halves of that argument are conditional.** A larger cohort makes "find it by
-  hand" false; leaving the free plan raises retention to 90 days or a year and makes the published
-  policy text wrong. Retention changes are NOT retroactive either, so recordings keep the window they
-  were captured under. Revisit on either trigger.
+- **DONE, 2026-08-18 — built rather than left to its two revisit triggers.** An account-deletion call to
+  the vendor; Supabase's delete cascade doesn't reach a third party. The client sends
+  `PostHogBootstrap.CurrentDistinctId` to `POST /session-replay/identity` on sign-in, the backend keeps it
+  in `posthog_identities` (migration 0073), and `DeletionRequestService.verifyAndDelete` erases the
+  recordings before `admin.deleteUser` runs. **The order is forced and fails silently if reversed** — the
+  table cascades from `auth.users`, so deleting first leaves an empty read that reports success. A test
+  pins the order.
+
+  **Three things the original sketch on this list got wrong**, found by reading PostHog's `PersonViewSet`
+  source rather than its docs:
+  - `POST /api/projects/:id/persons/bulk_delete/` takes `distinct_ids` **directly**. The person-UUID
+    lookup this list called for is two round trips for nothing.
+  - `delete_recordings` is **independent of** `delete_events` — neither implies the other, so sending one
+    silently leaves the other half behind.
+  - The API host is **not** the ingestion host: events go to `eu.i.posthog.com`, this call goes to
+    `eu.posthog.com`. `bulk_delete` answers 202 for work it has only queued, so getting it wrong fails
+    quietly.
+
+  Identities are stored **one row per distinct id**, not one column per user, because PostHog mints an id
+  per install — a player who reinstalled would otherwise keep every earlier recording after asking to be
+  erased. A PostHog failure does **not** block the account deletion (the right to erasure is not a third
+  party's to veto, and retention expires what it misses); the miss is written into
+  `deletion_requests.notes` instead of swallowed.
+
+  **The two triggers that justified deferring it are now moot, and that is the point of building it** —
+  the pipeline no longer depends on the cohort staying hand-searchable or on the plan staying free.
 - **DONE.** A Play Data Safety amendment — App activity → App interactions, declared as both
   collected AND shared, since Google's own definition of that category names screenshots. It was
   deliberately deferred while the closed-testing release sat in Google's review queue, because filing a
