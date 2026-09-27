@@ -34,7 +34,8 @@ Sibling material, single copies, do not duplicate:
 
 - `departments/engineering/docs/unity-partner-qa-record.md` (this repo) — the partner's four answer
   batches covering C1–C18 plus B1. The **only** copy. §1's verdicts cite into it.
-- `docs/BACKEND-INTEGRATION-PLAN.md` (Unity repo) — the file-by-file plan. Its §5 carries the original
+- `inbox/reign-and-gain-unity-BACKEND-INTEGRATION-PLAN.md` (this repo; retired from the Unity repo
+  2026-09-27) — the file-by-file plan. Its §5 carries the original
   question list and its §6 the effort estimates.
 
 ---
