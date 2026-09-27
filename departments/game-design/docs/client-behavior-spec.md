@@ -14,11 +14,12 @@
 > The backend-side counterpart of this spec (Moat/Game/Edge — trust scoring, XP caps, gyms, guild
 > RPCs) is filed as `departments/engineering/docs/backend-behavior-spec.md`.
 >
-> **Nothing about the client is proven live on device.** The C# that existed in this repo compiled
-> clean on 2026-07-28, but that code is deleted and the client is being rebuilt by the partner
-> against `docs/unity-client-brief.md`. Unproven: `hostbridge.aar` has not been built, delivered, or
-> loaded; the manifest-fragment launcher override has not been exercised; no bridge round trip has
-> run on real hardware — see `docs/PLAN-closeout.md` Phase 5 in the backend repo.
+> **The client is live on device.** A friends-and-family launch runs the partner's Unity client from
+> a Google Play closed track, with `hostbridge.aar` loaded and real workouts reaching production
+> (backend `CLAUDE.md`, corrected 2026-08-20; release gate closed 2026-08-25). The partner builds
+> against `unity-bridge-contract.md` and the API's Swagger UI; the original `unity-client-brief.md`
+> was deleted 2026-09-27 as overtaken. (This note said "nothing is proven live on device" until
+> 2026-09-27.)
 
 ## Trust posture (client is untrusted — applies to every screen)
 
